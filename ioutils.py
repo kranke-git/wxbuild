@@ -32,4 +32,3 @@ def read_nth_line( filepath, n ):
             if i == n-1:   # 0-based indexing → nth line
                 return line.strip()
     return None
-
