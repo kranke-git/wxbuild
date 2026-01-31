@@ -6,6 +6,7 @@ import os
 import requests
 import pandas       as     pd
 import numpy        as     np
+import copy
 from   ioutils      import list_svante_files, read_nth_line
 from   miscutils    import shift_tuple, swapMonthTmy
 from   constants    import epw_colnames, months_labels
@@ -277,7 +278,6 @@ class epw_collection:
                 with open( local_path, "wb" ) as f:
                     f.write( resp.content )
 
-    # TO BE FIXED/COMPLETED.         
     def with_futureShifts( self, params: dict, saveflag: bool = False ):
         """
         Method to generate future shifted files for all EPWFile instances in the collection.
@@ -300,9 +300,10 @@ class epw_collection:
             self.downloadCmip( params['model'] )
         else:
             print( f"CMIP6 files for {params['model']} already exist locally. Proceeding with future shift..." )
-        future_files = []
-        for epwfile in self.files:
+        future_files  = []
+        current_files = self.files
+        for epwfile in current_files:
             future_files.append( epwfile.with_futureShift( f"{self.data_directory}/cmip6", params, savedir = savedir ) )
-        self_copy       = self
+        self_copy       = copy.deepcopy( self )
         self_copy.files = future_files
         return self_copy
