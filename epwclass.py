@@ -246,7 +246,10 @@ class epw_collection:
             raise ValueError(f"No {self.obj_type} files found in the specified directory.")
         else:
             self.files = self.read_all_files()
-
+        # Set amy_years if filetype is 'amy'
+        if self.obj_type == 'amy':
+            self.amy_years = [ file.avgYear for file in self.files ]
+        
     def read_all_files( self ):
         """
         Method to read all EPW files in the specified directory and store them as EPWFile instances.
@@ -294,6 +297,9 @@ class epw_collection:
             os.makedirs( savedir, exist_ok = True )
         else:
             savedir = None
+        # Set the default model if not provided
+        if 'model' not in params:
+            params['model'] = 'CanESM5'
         # Download CMIP6 files if not already present
         model_dir = f"{self.data_directory}/cmip6/{ params['model'] }"
         if os.path.exists( model_dir ) is False:
@@ -301,9 +307,17 @@ class epw_collection:
         else:
             print( f"CMIP6 files for {params['model']} already exist locally. Proceeding with future shift..." )
         future_files  = []
-        current_files = self.files
-        for epwfile in current_files:
+        yearsShift    = params.get( 'futyear', 2050 ) - round( sum( self.amy_years ) / len( self.amy_years ) )
+        print( f"Average shift for each AMY file: {yearsShift} years" )
+        for epwfile in self.files:
+            if self.obj_type == 'amy':
+                params['futyear'] = epwfile.avgYear + yearsShift
+            else:
+                params['futyear'] = params.get( 'futyear', 2050 )
             future_files.append( epwfile.with_futureShift( f"{self.data_directory}/cmip6", params, savedir = savedir ) )
-        self_copy       = copy.deepcopy( self )
-        self_copy.files = future_files
+        # Set attributes for the new collection
+        self_copy           = copy.deepcopy( self )
+        self_copy.files     = future_files
+        self_copy.obj_type  = f"f{self.obj_type}"
+        self_copy.amy_years = [ file.avgYear for file in future_files ] if self.obj_type == 'amy' else None
         return self_copy
