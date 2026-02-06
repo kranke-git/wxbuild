@@ -7,8 +7,9 @@ def list_svante_files( url, extension = ".epw" ):
     subdirectories and query strings.
     Returns just filenames.
     """
-    resp = requests.get(url)
-    resp.raise_for_status()
+    resp = requests.get( url )
+    if resp.status_code != 200:
+        return 404
     
     soup = BeautifulSoup(resp.text, "html.parser")
     files = []

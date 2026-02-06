@@ -41,7 +41,8 @@ class EPWFile:
     daylight_string: str          = None
     comment1:        str          = None
     comment2:        str          = None
-    data_period_str: str          = None 
+    data_period_str: str          = None
+    _skip_post:      bool         = False 
     
     def __post_init__( self ):
         """
@@ -54,6 +55,9 @@ class EPWFile:
             (4) Get range of years if available
             (5) Assign other metadata fields from the header
         """
+        # Skip post init if specified   
+        if self._skip_post is True:
+            return
         
         # ( 1 ) Read the EPW file into a DataFrame, assign filename field based on path 
         self.filename = Path( self.file_path ).name
@@ -127,7 +131,7 @@ class EPWFile:
         ----------
         """
         # Unpack the parameters
-        model       = params.get( 'model',  'CanESM5' )
+        model       = params.get( 'model',  'MPI-ESM1-2-LR' )
         member      = params.get( 'member', 'MAVG' )
         futyear     = params.get( 'futyear', 2050 )
         futexp      = params.get( 'futexp', 'ssp245' )
@@ -169,12 +173,12 @@ class EPWFile:
         num_years        = futperiod[-1] - futperiod[0] + 1
         month_strs       = [f"{months_labels[row.Month-1]}={row.Year}" for row in month_year_pairs.itertuples(index=False)]
         new_comment1     = f'COMMENTS 1,"BC3 emulator - #years=[{num_years}] Period of Record={futperiod[0]}-{futperiod[-1]}; ' + "; ".join(month_strs) + '"'
-        new_comment2     = f'COMMENTS 2,"{new_filetype.upper()} processed with BC3 Emulator -- pgiani@mit.edu for more info"'
+        new_comment2     = f'COMMENTS 2,"{new_filetype.upper()} processed with BC3 Emulator -- pgiani@mit.edu for more info; model={model}; scenario={futexp}"'
         new_source       = f'BC3Emulator_{model}_{member}_{futexp}_{futyear}'
 
         # Return a new EPWFile instance with the modified data (Replace skips the post_init method)
         new_instance     = replace( self, data = new_data, file_path = new_filepath, filetype = new_filetype, filename = new_filename, years_in_file = new_years_in_file,
-                        year_range = new_years_range, avgYear = new_avgYear, comment1 = new_comment1, comment2 = new_comment2, source = new_source ) 
+                        year_range = new_years_range, avgYear = new_avgYear, comment1 = new_comment1, comment2 = new_comment2, source = new_source, _skip_post = True ) 
         # Write out the file if savedir is specified
         if savedir is not None:
             new_instance.writeToFile( new_filepath )
@@ -268,10 +272,12 @@ class epw_collection:
 
     def downloadCmip( self, model: str ):
         # Create local directory if it doesn't exist
-        os.makedirs( f"{self.data_directory}/cmip6/{model}", exist_ok = True )
         # Download the files
         print( f"Downloading CMIP6 files for {model}... It might take a few minutes." )
         cmip6_files = list_svante_files( f"{self.online_directory}/cmip6/{model}", extension = ".nc" )
+        if cmip6_files == 404:
+            raise ValueError( f"CMIP6 files for model {model} not found online." )
+        os.makedirs( f"{self.data_directory}/cmip6/{model}", exist_ok = True )
         for file in cmip6_files:
             file_url   = f"{self.online_directory}/cmip6/{model}/{file}"
             local_path = f"{self.data_directory}/cmip6/{model}/{file}"
@@ -299,16 +305,24 @@ class epw_collection:
             savedir = None
         # Set the default model if not provided
         if 'model' not in params:
-            params['model'] = 'CanESM5'
+            params['model'] = 'MPI-ESM1-2-LR'
         # Download CMIP6 files if not already present
         model_dir = f"{self.data_directory}/cmip6/{ params['model'] }"
         if os.path.exists( model_dir ) is False:
             self.downloadCmip( params['model'] )
         else:
             print( f"CMIP6 files for {params['model']} already exist locally. Proceeding with future shift..." )
+        # Calculate yearsShift for 'amy' files
+        if self.obj_type == 'amy':
+            yearsShift    = params.get( 'futyear', 2050 ) - round( sum( self.amy_years ) / len( self.amy_years ) )
+            print(f"Calculated yearsShift = {yearsShift} based on average year of current AMY files and futyear parameter.")
+            # Check that the yearsShift would not bring any of the current amy_years beyond 2100; if so, adjust
+            max_future_year = max( self.amy_years ) + yearsShift
+            if max_future_year > 2100:
+                yearsShift = 2100 - max( self.amy_years )
+                print( f"Adjusted yearsShift to {yearsShift} to avoid exceeding year 2100." )
+        # Loop over all files and generate future shifted versions
         future_files  = []
-        yearsShift    = params.get( 'futyear', 2050 ) - round( sum( self.amy_years ) / len( self.amy_years ) )
-        print( f"Average shift for each AMY file: {yearsShift} years" )
         for epwfile in self.files:
             if self.obj_type == 'amy':
                 params['futyear'] = epwfile.avgYear + yearsShift

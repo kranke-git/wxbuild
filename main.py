@@ -9,4 +9,4 @@ current_amy = epw_collection( filetype = 'amy', location = 'Boston__MA__USA' )
 #                                                         params = {'model':'CanESM5'},
 #                                                         savedir = None )
 
-future_amy_coll = current_amy.with_futureShifts( params = { 'futyear': 2050  }, saveflag = False )
+future_amy_coll = current_amy.with_futureShifts( params = { 'model':'CanESM5', 'futyear': 2050, 'futexp':'ssp585'  }, saveflag = True )
