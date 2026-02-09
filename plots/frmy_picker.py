@@ -226,11 +226,11 @@ def show_frmy_picker(
     location: Optional[str] = None,
     repo_root: str = "/content/wxbuild",
     epwdata_root: str = "/content/wxbuild/epwdata",
-    figsize: Tuple[int, int] = (14, 4),
-    title_prefix: str = "FRMY vs TMY",
+    figsize: Tuple[int, int] = (15, 4),
+    title_prefix: str = "FRMY vs RMY",
     y_label: str = "Dry-Bulb Temperature (°C)",
 ):
-    """Display buttons for FRMY files and plot selected FRMY vs TMY."""
+    """Display buttons for FRMY files and plot selected FRMY vs RMY."""
     if location is None:
         location = globals().get("location")
     if not location:
@@ -240,7 +240,7 @@ def show_frmy_picker(
     frmy_dir = copy_frmys_to_epwdata_city(location=location, repo_root=repo_root, epwdata_root=epwdata_root)
 
     # Baseline TMY EPW (first EPW found)
-    tmy_dir = os.path.join(epwdata_root, location, "tmy")
+    tmy_dir = os.path.join(epwdata_root, location, "rmy")
     tmy_path = _find_first_epw(tmy_dir)
     tmy_dbt = _read_epw_dbt(tmy_path)
 
@@ -277,7 +277,7 @@ def show_frmy_picker(
 
                 plt.figure(figsize=figsize)
                 ax = plt.gca()
-                ax.plot(tmy_dbt, label="Original TMY", linewidth=2, color="#3a3a3a")
+                ax.plot(tmy_dbt, label="Original RMY", linewidth=2, color="#3a3a3a")
                 ax.plot(frmy_dbt, label=label, linewidth=2, color="#b82e45")
 
                 ax.set_xlabel("Hour of Year")
