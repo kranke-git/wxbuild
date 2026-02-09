@@ -298,7 +298,7 @@ def show_frmy_picker(
     header = widgets.HTML(
         value=f"<b>FRMY files detected:</b> {len(entries)} &nbsp; | &nbsp; "
               f"<b>City:</b> {location} &nbsp; | &nbsp; "
-              f"<b>TMY:</b> {os.path.basename(tmy_path)}"
+              f"<b>RMY:</b> {os.path.basename(tmy_path)}"
     )
 
     grid = widgets.GridBox(
