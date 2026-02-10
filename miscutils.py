@@ -55,4 +55,6 @@ def swapMonthTmy( tmy3_mod, idxmonth, avgShift = {'dbt': 0, 'dpt': 0, 'pres':0, 
         else:
             tmy3_mod.loc[ idxmonth, 'Year'] = swapYears[ 0 ]
 
-    return( tmy3_mod )
+    return( tmy3_mod )    
+            
+            

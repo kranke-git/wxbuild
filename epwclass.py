@@ -7,6 +7,7 @@ import requests
 import pandas       as     pd
 import numpy        as     np
 import copy
+import xarray       as     xr
 from   ioutils      import list_svante_files, read_nth_line
 from   miscutils    import shift_tuple, swapMonthTmy
 from   constants    import epw_colnames, months_labels
@@ -150,7 +151,7 @@ class EPWFile:
         for month in np.arange( 0, 12, 1 ) + 1:
             # Figure out the average shift for the futuremonth
             idxmonth     = self.data.index[ self.data['Month'] == month].tolist() 
-            coefs        = getPatternCoefficients( model_dir, pattern_exp, member, grid, month, {'lat':self.latitude, 'lon':self.longitude } )
+            coefs        = getPatternCoefficients( model_dir, pattern_exp, member, grid, month, {'lat':self.latitude, 'lon':self.longitude + 360 } )
             currentPres  = self.data[ self.data['Month'] == month]['pres'].mean()
             currentDpt   = self.data[ self.data['Month'] == month]['dpt'].mean()
             avgShift     = calculateShift( coefs, deltaTG, currentPres, currentDpt, self.data.iloc[ idxmonth ] )
@@ -183,7 +184,8 @@ class EPWFile:
         if savedir is not None:
             new_instance.writeToFile( new_filepath )
         # Return the replaced instance
-        return new_instance
+        return new_instance            
+
             
     def writeToFile( self, output_path: str ):
         """
@@ -335,3 +337,62 @@ class epw_collection:
         self_copy.obj_type  = f"f{self.obj_type}"
         self_copy.amy_years = [ file.avgYear for file in future_files ] if self.obj_type == 'amy' else None
         return self_copy
+
+    def getVariableAnomalies( self, params ):
+        """
+            Function to calculate the anomalies for a given variable and month
+            Args:
+                location (str): Location for which to calculate the anomalies
+                variable (str): Variable for which to calculate the anomalies
+                years (list):    List of years to consider for the anomalies
+            Returns:
+                pd.Series: Series containing the anomalies for the given variable
+        """
+        varMapping  = { 'dbt': 'tas'}
+        variable    = params.get( 'variable', 'dbt' )
+        years       = params.get( 'years', [ 2050 ] )
+        model       = params.get( 'model', 'MPI-ESM1-2-LR' )
+        cmipdir     = params.get( 'cmipdir', f"./epwdata/cmip6/{model}" )
+        member      = params.get( 'member', 'MAVG' )
+        futexp      = params.get( 'futexp', 'ssp245' )
+        experiments = "ssp126-ssp245-ssp370-ssp585"
+        grid        = "r180x90"
+        if variable not in varMapping:
+            raise ValueError( f"Variable {variable} not recognized. Available variables: {list(varMapping.keys())}" )
+        
+        # Get Annual averages for the variable from the file
+        if variable not in self.files[0].data.columns:
+            raise ValueError( f"Variable {variable} not found in the EPW file data columns." )
+        else:
+            avgVar = self.files[0].data[ variable ].mean()
+        
+        # Get CMIP6 files if not already present
+        if os.path.exists( cmipdir ) is False:
+            self.downloadCmip( model )
+        
+        # Get CMIP6 pattern scaling coefficients for the location and variable
+        var_cmip = varMapping[ variable ]
+        n4file  = f"{cmipdir}/PatternScalingCoefficients_{var_cmip}_{experiments}_{member}_{grid}_AnnualAverages.nc"
+        if os.path.isfile( n4file ):
+            coefs    = xr.open_dataset( n4file )['slope'].sel(**{'lat':self.files[0].latitude, 'lon':self.files[0].longitude + 360 }, method = 'nearest' ).values
+        else:  
+            print( f"Downloading pattern scaling coefficients for {var_cmip} from svante directory..." )
+            n4file_url = f"{self.online_directory}/cmip6/{model}/PatternScalingCoefficients_{var_cmip}_{experiments}_{member}_{grid}_AnnualAverages.nc"
+            resp       = requests.get( n4file_url )
+            resp.raise_for_status()
+            with open( n4file, "wb" ) as f:
+                f.write( resp.content )
+            coefs    = xr.open_dataset( n4file )['slope'].sel(**{'lat':self.files[0].latitude, 'lon':self.files[0].longitude + 360 }, method = 'nearest' ).values
+        # Loop over the years
+        print( f"Computing anomalies..." )
+        var_anomalies = []
+        for year in years:
+            dt_global = CalcGlobalDT( cmipdir, model, member, self.files[0].year_range, (year, year), futexp )
+            var_anomaly = coefs * dt_global
+            var_anomalies.append( var_anomaly )
+            
+        dfreturn = pd.DataFrame(
+            {'year': years, f'{variable}_anomaly': var_anomalies}
+        ).set_index('year')    
+        dfreturn[ variable ] = dfreturn[f'{variable}_anomaly'] + avgVar
+        return dfreturn
