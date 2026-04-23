@@ -87,3 +87,88 @@ def uv2wind(u, v):
     direction = (270 - np.degrees(np.arctan2(v, u))) % 360  # Convert to meteorological convention
     
     return speed, direction
+
+import numpy as np
+
+def saturation_mixing_ratio(T, p):
+    """
+    Saturation mixing ratio (kg/kg)
+
+    Parameters
+    ----------
+    T : float or array
+        Temperature in Kelvin
+    p : float or array
+        Pressure in hPa
+
+    Returns
+    -------
+    qs : float or array
+        Saturation mixing ratio (kg/kg)
+    """
+    # saturation vapor pressure (hPa)
+    T_C = T - 273.15
+    es  = 6.112 * np.exp((17.67 * T_C) / (T_C + 243.5))
+    epsilon = 0.622
+    qs = epsilon * es / (p - es)
+
+    return qs
+
+
+
+def es(T):
+    """Saturation vapor pressure (hPa), Bolton formula"""
+    T_C = T - 273.15
+    return 6.112 * np.exp((17.67 * T_C) / (T_C + 243.5))
+
+
+def des_dT(T):
+    """
+    d(es)/dT using Clausius-Clapeyron (hPa/K)
+    """
+    Lv = 2.5e6      # J/kg
+    Rv = 461.5      # J/(kg K)
+    e = es(T)
+    return (Lv / (Rv * T**2)) * e
+
+def dqsat_dT(T, p):
+    """
+    Derivative of saturation mixing ratio w.r.t temperature
+
+    Parameters
+    ----------
+    T : float or array (K)
+    p : float or array (hPa)
+
+    Returns
+    -------
+    dqs_dT : kg/kg/K
+    """
+    epsilon = 0.622
+
+    e = es(T)
+    de_dT = des_dT(T)
+
+    return epsilon * p * de_dT / (p - e)**2
+
+import numpy as np
+
+def rh_t2dpt( Tc, RH ):
+    """
+    Compute dew point temperature (°C) from dry bulb temperature (°C) and relative humidity (%).
+
+    Parameters:
+        Tc : temperature in °C
+        RH : relative humidity in % (0-100)
+
+    Returns:
+        Td : dew point in °C
+    """
+    # Magnus constants (over water)
+    a = 17.67
+    b = 243.5  # °C
+
+    gamma = np.log(RH / 100.0) + (a * Tc) / (b + Tc)
+    Td_c = (b * gamma) / (a - gamma)
+
+    return Td_c

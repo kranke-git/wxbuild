@@ -154,8 +154,10 @@ class EPWFile:
             coefs        = getPatternCoefficients( model_dir, pattern_exp, member, grid, month, {'lat':self.latitude, 'lon':self.longitude + 360 } )
             currentPres  = self.data[ self.data['Month'] == month]['pres'].mean()
             currentDpt   = self.data[ self.data['Month'] == month]['dpt'].mean()
-            avgShift     = calculateShift( coefs, deltaTG, currentPres, currentDpt, self.data.iloc[ idxmonth ] )
+            avgShift     = calculateShift( coefs, deltaTG, self.data.iloc[ idxmonth ] )
             new_data     = swapMonthTmy( new_data, idxmonth, avgShift, swapYears = np.arange( futperiod[0], futperiod[1] + 1, 1 ) )
+            # If RH greater than 100%, set to 100%
+            new_data.loc[ idxmonth, 'rh' ] = new_data.loc[ idxmonth, 'rh' ].clip( upper = 100 )
             # tmy3_fut  = fixRH( tmy3_fut )
 
         # New attributes for future file
@@ -164,7 +166,7 @@ class EPWFile:
         new_years_in_file = new_data['Year'].unique().tolist()
         new_years_range   = ( futperiod[0], futperiod[ -1 ] )
         new_avgYear       = round( ( futperiod[ 0 ] + futperiod[ -1 ] ) / 2 )
-        # SSet the new filepath
+        # Set the new filepath
         if savedir is not None:
             new_filepath = os.path.join( savedir, new_filename )
         else:
@@ -209,6 +211,23 @@ class EPWFile:
             f.write( f"{self.data_period_str}\n" )
             # Data
             self.data.drop( columns=['date', 'datetime'] ).to_csv( f, index = False, header = False )
+            
+    def calculateMonthlyAverages( self, variable: str ):
+        """
+        Method to calculate monthly averages for a specified variable.
+        Parameters
+        ----------
+        variable : str
+            The variable for which to calculate monthly averages (e.g., 'dbt', 'rh', etc.)
+        Returns
+        -------
+        pd.Series
+            A Series containing the monthly averages for the specified variable.
+        """
+        if variable not in self.data.columns:
+            raise ValueError( f"Variable '{variable}' not found in data columns." )
+        monthly_averages = self.data.groupby( 'Month' )[ variable ].mean()
+        return monthly_averages
 
 class epw_collection:
     def __init__(self, filetype: str, location: str, data_directory: str = "./epwdata", search_online: bool = True ):

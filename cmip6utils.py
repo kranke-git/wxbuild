@@ -41,37 +41,38 @@ def CalcGlobalDT( cmipdir, model, member, histperiod, futperiod, futexp ):
 
 def getPatternCoefficients( cmipdir, experiments, realization, grid, month, locCoords ):
     coefs     = {}
-    variables       = [ 'tas', 'uas', 'vas', 'ps', 'huss', 'tasmax', 'tasmin' ] 
+    variables       = [ 'tas', 'uas', 'vas', 'ps', 'huss', 'tasmax', 'tasmin', 'hurs' ] 
     for variable in variables:
         n4file  = f"{cmipdir}/PatternScalingCoefficients_{variable}_{experiments}_{realization}_{grid}_M{month}.nc"
         pscoef  = xr.open_dataset( n4file )['slope'].sel(**locCoords, method = 'nearest' ).values
         coefs[ variable ] = pscoef
+    print( f"Coefficients as follows: {coefs}" )
     return coefs
 
-def calculateShift( coefs, deltaTG, currentPres, currentDpt, tmy3M ):
+def calculateShift( coefs, deltaTG, tmy3M ):
     avgShift           = {}
-    avgShift[ 'dbt' ]  = coefs[ 'tas']  * deltaTG
-    avgShift[ 'pres' ] = coefs[ 'ps' ]  * deltaTG
-    avgShift[ 'u' ]    = coefs[ 'uas' ] * deltaTG
-    avgShift[ 'v' ]    = coefs[ 'vas' ] * deltaTG
-            
+    avgShift[ 'dbt' ]  = coefs[ 'tas']   * deltaTG
+    avgShift[ 'pres' ] = coefs[ 'ps' ]   * deltaTG
+    avgShift[ 'u' ]    = coefs[ 'uas' ]  * deltaTG
+    avgShift[ 'v' ]    = coefs[ 'vas' ]  * deltaTG
+    avgShift[ 'rh' ]   = coefs[ 'hurs' ] * deltaTG
+    
     # Figure out dewpoint
-    avgP      = currentPres
-    avgDPT    = currentDpt
-    avgQ      = dpt2q( avgDPT , avgP / 100 )
-    newQ      = avgQ + coefs['huss']*deltaTG
-    newP      = avgP + coefs['ps']*deltaTG
-    newDPT    = q2dpt( newQ, newP / 100 )
-    avgShift[ 'dpt' ] = newDPT - avgDPT
+    # avgP      = currentPres
+    # avgDPT    = currentDpt
+    # avgQ      = dpt2q( avgDPT , avgP / 100 )
+    # newQ      = avgQ + coefs['huss'] * deltaTG
+    # newP      = avgP + coefs['ps']   * deltaTG
+    # newDPT    = q2dpt( newQ, newP / 100 )
+    # avgShift[ 'dpt' ] = newDPT - avgDPT
     
     # diurnal temperature range
-    dtasmax = deltaTG * coefs['tasmax']
-    dtasmin = deltaTG * coefs['tasmin']
-    daily_max          = tmy3M.groupby('date')[ 'dbt' ].max().reset_index()
-    dbtmax_avg         = daily_max['dbt'].mean()
-    daily_min          = tmy3M.groupby('date')[ 'dbt' ].min().reset_index()
-    dbtmin_avg         = daily_min['dbt'].mean()
-
+    dtasmax    = deltaTG * coefs['tasmax']
+    dtasmin    = deltaTG * coefs['tasmin']
+    daily_max  = tmy3M.groupby('date')[ 'dbt' ].max().reset_index()
+    dbtmax_avg = daily_max['dbt'].mean()
+    daily_min  = tmy3M.groupby('date')[ 'dbt' ].min().reset_index()
+    dbtmin_avg = daily_min['dbt'].mean()
     avgShift[ 'at' ] = ( dtasmax - dtasmin ) / ( dbtmax_avg - dbtmin_avg )
 
     return avgShift
