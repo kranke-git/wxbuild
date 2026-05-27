@@ -286,6 +286,12 @@ class EPWFile:
                         "ignore",
                         message="Non-invertible starting MA parameters"
                     )
+                    
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="Maximum Likelihood optimization failed to converge"
+                    )
+                    
                     dbtCycle, A, phi, c = fitDiurnalCycle( month_subset, month, 'dbt' )
                     armaDbt    = sm.tsa.ARIMA( month_subset['dbt'].to_numpy() - dbtCycle.to_numpy(),  order = dbt_arma_order, trend='n' ).fit()
                     dbtRes     = armaDbt.resid
@@ -343,7 +349,7 @@ class EPWFile:
             self.arma_values = results
             return results
     
-    def generatePlausible( self, seed = 1666 ):
+    def generatePlausible( self, seed = 1666, write_flag = False ):
         """
         Method to generate a plausible future EPWFile based on the learned ARMA models.
         This method uses the fitted ARMA models to simulate future weather data.
@@ -391,6 +397,11 @@ class EPWFile:
         new_epw.file_path = os.path.join( os.path.dirname( self.file_path ), new_filename ).replace( self.filetype, new_epw.filetype )
         new_epw.filename  = new_filename
         new_epw.comment2  = f'COMMENTS 2," PLAUSIBLE (seed={seed}) {new_epw.filetype.upper()} file generated with BC3 Emulator (i.e., not real measurements) -- pgiani@mit.edu for more info"'
+        
+        # Write if requested
+        if write_flag is True:
+            new_epw.writeToFile()
+        
         return new_epw
 
 class epw_collection:

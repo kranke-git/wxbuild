@@ -103,6 +103,12 @@ def RegressArma( variable, exog, armaOrd ):
             "ignore",
             message="Non-invertible starting MA parameters"
         )
+        
+        warnings.filterwarnings(
+            "ignore",
+            message="Maximum Likelihood optimization failed to converge"
+        )
+
 
         armaVarModel = sm.tsa.ARIMA( residualsF, order = armaOrd, trend = 'n' )   
         armaVarFit   = armaVarModel.fit()
