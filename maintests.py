@@ -7,7 +7,8 @@ import matplotlib.pyplot as plt
 from   physicsutils import rh_t2dpt 
 
 
-current_tmy = epw_collection( filetype = 'tmy', location = 'Boston__MA__USA' ).files[0]
+tmy_collection = epw_collection( filetype = 'tmy', location = 'Boston__MA__USA' )
+current_tmy    = tmy_collection.files[0]
 future_tmy = current_tmy.with_futureShift( cmipdir = "/home/kranke/Documents/ResearchProjects/BC3/Data/CMIP",
                                                     params = {'model':'CanESM5', 'futyear': 2090, 'futexp':'ssp585' },
                                                     savedir = None )    

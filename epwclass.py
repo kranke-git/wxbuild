@@ -130,7 +130,7 @@ class EPWFile:
             self.data_period_str = read_nth_line( self.file_path, 8 )
 
         
-    def __repr__(self):
+    def __repr__( self ):
 
         nrows          = len( self.data )
         fitted = self.arma_values is not None
@@ -438,7 +438,18 @@ class epw_collection:
         # Set amy_years if filetype is 'amy'
         if self.obj_type == 'amy':
             self.amy_years = [ file.avgYear for file in self.files ]
-        
+    
+    def __repr__( self ):
+        return (
+            f"epw_collection("
+            f"obj_type='{self.obj_type}', "
+            f"location='{self.location}', "
+            f"Nfiles={self.Nfiles}, "
+            f"amy_years={getattr(self, 'amy_years', None)}"
+            f")"
+        )
+
+    
     def read_all_files( self ):
         """
         Method to read all EPW files in the specified directory and store them as EPWFile instances.
