@@ -7,6 +7,7 @@ import requests
 import pandas       as     pd
 import numpy        as     np
 import copy
+import warnings
 import xarray       as     xr
 from   ioutils      import list_svante_files, read_nth_line
 from   miscutils    import shift_tuple, swapMonthTmy
@@ -14,6 +15,10 @@ from   constants    import epw_colnames, months_labels
 from   dataclasses  import dataclass, replace
 from   cmip6utils   import CalcGlobalDT, getPatternCoefficients, calculateShift
 from   pathlib      import Path
+import statsmodels.api as sm
+from   armaUtils     import fitDiurnalCycle, checkResiduals, RegressArma
+from   physicsutils import rh_t2dpt
+
 
 @dataclass
 class EPWFile:
@@ -43,6 +48,7 @@ class EPWFile:
     comment1:        str          = None
     comment2:        str          = None
     data_period_str: str          = None
+    arma_values:     dict         = None
     _skip_post:      bool         = False 
     
     def __post_init__( self ):
@@ -124,7 +130,22 @@ class EPWFile:
             self.data_period_str = read_nth_line( self.file_path, 8 )
 
         
-    def with_futureShift( self, cmipdir, params, savedir = None ):
+    def __repr__(self):
+
+        nrows          = len( self.data )
+        fitted = self.arma_values is not None
+        return (
+            f"EPWFile("
+            f"nrows={nrows}, "
+            f"file_path='{self.file_path}', "
+            f"filetype='{self.filetype}', "
+            f"location='{self.location}', "
+            f"latitude={self.latitude}, "
+            f"longitude={self.longitude}"
+            f")"
+        )
+        
+    def with_futureShift( self, cmipdir, params, savedir = None, verbose = False ):
         """
         Method to generate a future file from the available present-day files.
         This is non-destructive; it returns a new EPWFile instance with the future data.
@@ -151,7 +172,7 @@ class EPWFile:
         for month in np.arange( 0, 12, 1 ) + 1:
             # Figure out the average shift for the futuremonth
             idxmonth     = self.data.index[ self.data['Month'] == month].tolist() 
-            coefs        = getPatternCoefficients( model_dir, pattern_exp, member, grid, month, {'lat':self.latitude, 'lon':self.longitude + 360 } )
+            coefs        = getPatternCoefficients( model_dir, pattern_exp, member, grid, month, {'lat':self.latitude, 'lon':self.longitude + 360 }, verbose = verbose )
             currentPres  = self.data[ self.data['Month'] == month]['pres'].mean()
             currentDpt   = self.data[ self.data['Month'] == month]['dpt'].mean()
             avgShift     = calculateShift( coefs, deltaTG, self.data.iloc[ idxmonth ] )
@@ -189,7 +210,7 @@ class EPWFile:
         return new_instance            
 
             
-    def writeToFile( self, output_path: str ):
+    def writeToFile( self, output_path = None ):
         """
         Method to write the EPWFile data to a specified output path.
         Parameters
@@ -197,6 +218,12 @@ class EPWFile:
         output_path : str
             The file path where the EPW data should be written.
         """
+        if output_path is None:
+            output_path = self.file_path
+        # Extract directory from output_path and create it if it doesn't exist
+        output_dir = os.path.dirname( output_path )
+        if not os.path.exists( output_dir ):
+            os.makedirs( output_dir )
         # First write the actual data without headers, then add the headers afterwards
         # Open the output file and prepend the first 8 lines
         with open( output_path, 'w' ) as f:
@@ -228,6 +255,143 @@ class EPWFile:
             raise ValueError( f"Variable '{variable}' not found in data columns." )
         monthly_averages = self.data.groupby( 'Month' )[ variable ].mean()
         return monthly_averages
+
+    def fitArma( self, dbt_arma_order = (2,0,2) ):
+
+        if self.arma_values is not None:
+            # Models are already fitted, return existing results
+            print("ARMA models already fitted. Returning existing results.")
+            return self.arma_values
+        
+        else:
+            # Arma values not present yet, so fit the models
+            print("Learning the ARMA models...")
+            der_variables = ['rh', 'pres', 'wspd']
+            results = {}
+
+            for month in range(1, 13):
+
+                month_subset = self.data[self.data['Month'] == month]
+                results[month] = {}
+
+                # DBT
+                with warnings.catch_warnings():
+        
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="Non-stationary starting autoregressive parameters"
+                    )
+
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="Non-invertible starting MA parameters"
+                    )
+                    dbtCycle, A, phi, c = fitDiurnalCycle( month_subset, month, 'dbt' )
+                    armaDbt    = sm.tsa.ARIMA( month_subset['dbt'].to_numpy() - dbtCycle.to_numpy(),  order = dbt_arma_order, trend='n' ).fit()
+                    dbtRes     = armaDbt.resid
+                    ldbt, sdbt = checkResiduals( dbtRes )
+
+                results[month]['dbt'] = {
+                    'arma_model': armaDbt,
+                    'residuals': dbtRes,
+                    'residual_stats': {
+                        'l': ldbt,
+                        's': sdbt,
+                    },
+                    'diurnal_cycle': {
+                        'dbtCycle': dbtCycle,
+                        'A': A,
+                        'phi': phi,
+                        'c': c,
+                    }
+                }
+
+                # Derived variables
+                for var in der_variables:
+
+                    if var == 'rh':
+                        exog = month_subset['dbt']
+                        armaOrd = (2, 0, 1)
+
+                    elif var == 'pres':
+                        exog = month_subset['dbt']
+                        armaOrd = (2, 0, 2)
+
+                    elif var == 'wspd':
+                        exog = month_subset['dbt']
+                        armaOrd = (2, 0, 1)
+
+                    corrVar, slpVar, intVar, modelVar, armaVar, varRes = ( RegressArma( month_subset[var], exog=exog, armaOrd=armaOrd ) )
+                    lVar, sVar = checkResiduals(varRes)
+
+                    results[month][var] = {
+                        'arma_model': armaVar,
+                        'residuals': varRes,
+                        'residual_stats': {
+                            'l': lVar,
+                            's': sVar,
+                        },
+                        'regression': {
+                            'corr': corrVar,
+                            'slope': slpVar,
+                            'intercept': intVar,
+                            'model': modelVar,
+                        }
+                    }
+            
+            # Assign the results to an attribute for later use
+            self.arma_values = results
+            return results
+    
+    def generatePlausible( self, seed = 1666 ):
+        """
+        Method to generate a plausible future EPWFile based on the learned ARMA models.
+        This method uses the fitted ARMA models to simulate future weather data.
+        seed: int, optional
+            Random seed for reproducibility (default: 1666).
+        Returns
+        -------
+        EPWFile
+            A new EPWFile instance containing the simulated future data.
+        """
+        # Loop over months and generate new data based on the learned ARMA models
+        rng     = np.random.default_rng( seed )
+        new_epw = copy.deepcopy( self ) # Create a deep copy of the current EPWFile instance to hold the new data
+        
+        roundings = { 'dbt': 1, 'rh': 0, 'pres': -2, 'wspd': 1 }
+        # Loop every month
+        for month in range(1, 13):
+            
+            month_mask = new_epw.data['Month'] == month
+            dbtRes     = self.arma_values[month]['dbt']['residuals']
+            armaDbt    = self.arma_values[month]['dbt']['arma_model']
+            dbtCycle   = self.arma_values[month]['dbt']['diurnal_cycle']['dbtCycle']
+            
+            # for dbt, the generation is dbtCycle (already correct length) + residuals simulated from the ARMA model (resampling from the residuals as the empirical distribution)
+            dbtGen  = round( dbtCycle + armaDbt.simulate( nsimulations = len( dbtRes ), state_shocks = rng.choice( dbtRes, size = len( dbtRes ), replace = True ), random_state = rng ), roundings[ 'dbt' ] ) 
+            new_epw.data.loc[ month_mask, 'dbt' ] = dbtGen.values
+            # for all the other variables, regression upon dbt + ARMA residuals
+            for var in ['rh', 'pres', 'wspd']:
+                varRes   = self.arma_values[month][var]['residuals']
+                armaVar  = self.arma_values[month][var]['arma_model']
+                modelVar = self.arma_values[month][var]['regression']['model']
+                # Generate the new variable based on the regression model and the simulated residuals
+                varGen   = round( modelVar.predict( dbtGen.values.reshape(-1,1) ) + armaVar.simulate( nsimulations = len( varRes ), state_shocks = rng.choice( varRes, size = len( varRes ), replace = True ), random_state = rng ), roundings[ var ] )
+                new_epw.data.loc[ month_mask, var ] = varGen.values
+            # Fix RH to be within min( existing_rh ) and 100%, and also recalculate dewpoint based on the new dbt and rh
+            min_rh = max( self.data.loc[ month_mask, 'rh' ].min() - 5, 0 )  # Ensure min_rh is not negative
+            max_rh = 100 
+            new_epw.data.loc[ month_mask, 'rh' ]  = new_epw.data.loc[ month_mask, 'rh' ].clip( lower = min_rh, upper = max_rh )
+            new_epw.data.loc[ month_mask, 'dpt' ] = round( rh_t2dpt( new_epw.data.loc[ month_mask, 'dbt' ], new_epw.data.loc[ month_mask, 'rh' ] ), 1 )
+        
+        # Change some attributes in the new_epw instance to reflect that it is a generated plausible future file
+        p                 = Path(self.filename)
+        new_filename      = f"{p.stem}_plausible_seed{seed}{p.suffix}"
+        new_epw.filetype  = f"p{self.filetype}"
+        new_epw.file_path = os.path.join( os.path.dirname( self.file_path ), new_filename ).replace( self.filetype, new_epw.filetype )
+        new_epw.filename  = new_filename
+        new_epw.comment2  = f'COMMENTS 2," PLAUSIBLE (seed={seed}) {new_epw.filetype.upper()} file generated with BC3 Emulator (i.e., not real measurements) -- pgiani@mit.edu for more info"'
+        return new_epw
 
 class epw_collection:
     def __init__(self, filetype: str, location: str, data_directory: str = "./epwdata", search_online: bool = True ):

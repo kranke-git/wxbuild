@@ -1,6 +1,8 @@
 # kranke - January 2026
 # Script to define a set of CMIP6-related utilities
 
+from tabnanny import verbose
+
 import numpy  as np
 import xarray as xr
 from   physicsutils  import dpt2q, q2dpt
@@ -39,14 +41,18 @@ def CalcGlobalDT( cmipdir, model, member, histperiod, futperiod, futexp ):
     deltaTG      = futVal - histVal
     return deltaTG
 
-def getPatternCoefficients( cmipdir, experiments, realization, grid, month, locCoords ):
+def getPatternCoefficients( cmipdir, experiments, realization, grid, month, locCoords, verbose = False ):
     coefs     = {}
     variables       = [ 'tas', 'uas', 'vas', 'ps', 'huss', 'tasmax', 'tasmin', 'hurs' ] 
     for variable in variables:
         n4file  = f"{cmipdir}/PatternScalingCoefficients_{variable}_{experiments}_{realization}_{grid}_M{month}.nc"
         pscoef  = xr.open_dataset( n4file )['slope'].sel(**locCoords, method = 'nearest' ).values
         coefs[ variable ] = pscoef
-    print( f"Coefficients as follows: {coefs}" )
+    # Print the coefficients if verbose is True
+    
+    if verbose:
+        print( f"Coefficients as follows: {coefs}" )
+    # Return coefficients
     return coefs
 
 def calculateShift( coefs, deltaTG, tmy3M ):
