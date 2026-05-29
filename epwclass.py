@@ -49,6 +49,7 @@ class EPWFile:
     comment2:        str          = None
     data_period_str: str          = None
     arma_values:     dict         = None
+    seed:          int            = None
     _skip_post:      bool         = False 
     
     def __post_init__( self ):
@@ -77,6 +78,8 @@ class EPWFile:
             self.data       = df
         else:
             df = self.data
+        # Assign na if any value is 999
+        df.replace( 999, np.nan, inplace = True )
 
         # ( 2 ) Automatically populate years from the DataFrame
         if isinstance( self.data, pd.DataFrame)  and 'Year' in self.data.columns:
@@ -128,6 +131,8 @@ class EPWFile:
             self.comment1        = read_nth_line( self.file_path, 6 )
             self.comment2        = read_nth_line( self.file_path, 7 )
             self.data_period_str = read_nth_line( self.file_path, 8 )
+            if self.filetype == 'ptmy' or self.filetype == 'fptmy':
+                self.seed = int( re.search( r"seed(\d+)", self.filename ).group(1) ) if re.search( r"seed(\d+)", self.filename ) else None
 
         
     def __repr__( self ):
@@ -152,6 +157,7 @@ class EPWFile:
         Parameters
         ----------
         """
+        
         # Unpack the parameters
         model       = params.get( 'model',  'MPI-ESM1-2-LR' )
         member      = params.get( 'member', 'MAVG' )
@@ -160,6 +166,24 @@ class EPWFile:
         pattern_exp = params.get( 'pattern_exp', 'ssp126-ssp245-ssp370-ssp585' )
         grid        = params.get( 'grid', 'r180x90' )
         
+        # New attributes for future file
+        seed_value        = self.seed if hasattr( self, 'seed' ) else None
+        seed_string       = f"_seed{seed_value}" if seed_value is not None else ""
+        new_filetype      = f"f{self.filetype}"
+        new_filename      = f"{self.location}_{new_filetype}_{futyear}_{futexp}_{model}{seed_string}.epw"
+        
+        # Set the new filepath
+        if savedir is not None:
+            new_filepath = os.path.join( savedir, new_filename )
+        else:
+            new_filepath = os.path.join( os.path.dirname( self.file_path ), new_filename )
+
+        # If file already exists, return the existing file instead of creating a new one
+        if os.path.exists( new_filepath ):
+            print( f"Future file {new_filepath} already exists. Returning existing file." )
+            return EPWFile( file_path = new_filepath, filetype = new_filetype, location = self.location, _skip_post = False )
+        
+        # We only reach here if file does not exist, so we proceed to create a new future file
         # Instantiate a new EPWFile object for the future data
         new_data = self.data.copy()
         
@@ -177,21 +201,7 @@ class EPWFile:
             currentDpt   = self.data[ self.data['Month'] == month]['dpt'].mean()
             avgShift     = calculateShift( coefs, deltaTG, self.data.iloc[ idxmonth ] )
             new_data     = swapMonthTmy( new_data, idxmonth, avgShift, swapYears = np.arange( futperiod[0], futperiod[1] + 1, 1 ) )
-            # If RH greater than 100%, set to 100%
-            new_data.loc[ idxmonth, 'rh' ] = new_data.loc[ idxmonth, 'rh' ].clip( upper = 100 )
-            # tmy3_fut  = fixRH( tmy3_fut )
 
-        # New attributes for future file
-        new_filetype      = f"f{self.filetype}"
-        new_filename      = f"{self.location}_{new_filetype}_{futyear}_{futexp}_{model}.epw"
-        new_years_in_file = new_data['Year'].unique().tolist()
-        new_years_range   = ( futperiod[0], futperiod[ -1 ] )
-        new_avgYear       = round( ( futperiod[ 0 ] + futperiod[ -1 ] ) / 2 )
-        # Set the new filepath
-        if savedir is not None:
-            new_filepath = os.path.join( savedir, new_filename )
-        else:
-            new_filepath = os.path.join( os.path.dirname( self.file_path ), new_filename )
         # Assign new headers for future file
         month_year_pairs = new_data[['Month', 'Year']].drop_duplicates().sort_values(['Month','Year'])
         num_years        = futperiod[-1] - futperiod[0] + 1
@@ -201,11 +211,16 @@ class EPWFile:
         new_source       = f'BC3Emulator_{model}_{member}_{futexp}_{futyear}'
 
         # Return a new EPWFile instance with the modified data (Replace skips the post_init method)
+        new_years_in_file = new_data['Year'].unique().tolist()
+        new_years_range   = ( futperiod[0], futperiod[ -1 ] )
+        new_avgYear       = round( ( futperiod[ 0 ] + futperiod[ -1 ] ) / 2 )
         new_instance     = replace( self, data = new_data, file_path = new_filepath, filetype = new_filetype, filename = new_filename, years_in_file = new_years_in_file,
                         year_range = new_years_range, avgYear = new_avgYear, comment1 = new_comment1, comment2 = new_comment2, source = new_source, _skip_post = True ) 
+        
         # Write out the file if savedir is specified
         if savedir is not None:
             new_instance.writeToFile( new_filepath )
+            
         # Return the replaced instance
         return new_instance            
 
@@ -237,7 +252,10 @@ class EPWFile:
             f.write( f"{self.comment2}\n" )
             f.write( f"{self.data_period_str}\n" )
             # Data
-            self.data.drop( columns=['date', 'datetime'] ).to_csv( f, index = False, header = False )
+            data_to_write = self.data.drop( columns=['date', 'datetime'] )
+            # Put 999 when na is present
+            data_to_write.fillna( 999, inplace = True )
+            data_to_write.to_csv( f, index = False, header = False )
             
     def calculateMonthlyAverages( self, variable: str ):
         """
@@ -317,15 +335,15 @@ class EPWFile:
 
                     if var == 'rh':
                         exog = month_subset['dbt']
-                        armaOrd = (2, 0, 1)
+                        armaOrd = (3, 0, 0)
 
                     elif var == 'pres':
                         exog = month_subset['dbt']
-                        armaOrd = (2, 0, 2)
+                        armaOrd = (5, 0, 0)
 
                     elif var == 'wspd':
                         exog = month_subset['dbt']
-                        armaOrd = (2, 0, 1)
+                        armaOrd = (3, 0, 0)
 
                     corrVar, slpVar, intVar, modelVar, armaVar, varRes = ( RegressArma( month_subset[var], exog=exog, armaOrd=armaOrd ) )
                     lVar, sVar = checkResiduals(varRes)
@@ -360,11 +378,30 @@ class EPWFile:
         EPWFile
             A new EPWFile instance containing the simulated future data.
         """
+        
+        # Get new filename and file path for the plausible future file
+        p            = Path(self.filename)
+        new_filename = f"{p.stem}_plausible_seed{seed}{p.suffix}"
+        new_filetype = f"p{self.filetype}"
+        new_filepath = os.path.join( os.path.dirname( self.file_path ), new_filename ).replace( self.filetype, new_filetype )
+        
+        # Check if file already exists; if so, return the existing file instead of generating a new one
+        if os.path.exists( new_filepath ):
+            print( f"Plausible file {new_filepath} with seed {seed} already exists. Returning existing file." )
+            return EPWFile( file_path = new_filepath, filetype = new_filetype, location = self.location, _skip_post = False )
+        
+        # Check if ARMA models are fitted; if not, fit them
+        if self.arma_values is None:
+            print("ARMA models not fitted yet. Fitting now...")
+            self.fitArma()
+        else:
+            print("Using existing fitted ARMA models.")
+        
         # Loop over months and generate new data based on the learned ARMA models
         rng     = np.random.default_rng( seed )
         new_epw = copy.deepcopy( self ) # Create a deep copy of the current EPWFile instance to hold the new data
         
-        roundings = { 'dbt': 1, 'rh': 0, 'pres': -2, 'wspd': 1 }
+        roundings = { 'dbt': 1, 'rh': 0, 'pres': -1, 'wspd': 1 }
         # Loop every month
         for month in range(1, 13):
             
@@ -384,20 +421,28 @@ class EPWFile:
                 # Generate the new variable based on the regression model and the simulated residuals
                 varGen   = round( modelVar.predict( dbtGen.values.reshape(-1,1) ) + armaVar.simulate( nsimulations = len( varRes ), state_shocks = rng.choice( varRes, size = len( varRes ), replace = True ), random_state = rng ), roundings[ var ] )
                 new_epw.data.loc[ month_mask, var ] = varGen.values
+                
             # Fix RH to be within min( existing_rh ) and 100%, and also recalculate dewpoint based on the new dbt and rh
-            min_rh = max( self.data.loc[ month_mask, 'rh' ].min() - 5, 0 )  # Ensure min_rh is not negative
+            min_rh = round( self.data.loc[ month_mask, 'rh' ].min() * 0.90 ) # Allow for a 10% decrease in minimum RH to avoid unrealistic low values
             max_rh = 100 
             new_epw.data.loc[ month_mask, 'rh' ]  = new_epw.data.loc[ month_mask, 'rh' ].clip( lower = min_rh, upper = max_rh )
             new_epw.data.loc[ month_mask, 'dpt' ] = round( rh_t2dpt( new_epw.data.loc[ month_mask, 'dbt' ], new_epw.data.loc[ month_mask, 'rh' ] ), 1 )
+            
+            # Fix pressure to be within min( existing_pressure ) and max( existing_pressure )
+            min_pres = round( self.data.loc[ month_mask, 'pres' ].min() * 0.95 ) # Allow for a 5% decrease in minimum pressure to avoid unrealistic low values
+            max_pres = round( self.data.loc[ month_mask, 'pres' ].max() * 1.05 ) # Allow for a 5% increase in maximum pressure to avoid unrealistic high values
+            new_epw.data.loc[ month_mask, 'pres' ] = new_epw.data.loc[ month_mask, 'pres' ].clip( lower = min_pres, upper = max_pres )
+            # Clip wind speed values to be non-negative and bounded by the maximum observed wind speed in the original data for that month
+            max_wind = round( self.data.loc[ month_mask, 'wspd' ].max() * 1.10 ) # Allow for a 10% increase in maximum wind speed to avoid unrealistic high values
+            min_wind = 0
+            new_epw.data.loc[ month_mask, 'wspd' ] = new_epw.data.loc[ month_mask, 'wspd' ].clip( lower = min_wind, upper = max_wind )
         
         # Change some attributes in the new_epw instance to reflect that it is a generated plausible future file
-        p                 = Path(self.filename)
-        new_filename      = f"{p.stem}_plausible_seed{seed}{p.suffix}"
-        new_epw.filetype  = f"p{self.filetype}"
-        new_epw.file_path = os.path.join( os.path.dirname( self.file_path ), new_filename ).replace( self.filetype, new_epw.filetype )
+        new_epw.file_path = new_filepath
+        new_epw.filetype  = new_filetype
         new_epw.filename  = new_filename
         new_epw.comment2  = f'COMMENTS 2," PLAUSIBLE (seed={seed}) {new_epw.filetype.upper()} file generated with BC3 Emulator (i.e., not real measurements) -- pgiani@mit.edu for more info"'
-        
+        new_epw.seed      = seed
         # Write if requested
         if write_flag is True:
             new_epw.writeToFile()
@@ -418,6 +463,7 @@ class epw_collection:
         search_online : bool, optional
             Whether to search online for files (default: True)
         """
+        
         self.obj_type         = filetype
         self.location         = location
         self.data_directory   = data_directory   
@@ -426,22 +472,29 @@ class epw_collection:
         os.makedirs( f"{self.data_directory}/{self.location}/{self.obj_type}", exist_ok = True )
         # Search files from local directory first; look online if not found locally and search_online is True
         self.files = os.listdir( f"{self.data_directory}/{self.location}/{self.obj_type}" )
+        
         if self.files == []:
             print( f"No local files found for {self.location}/{self.obj_type}.")
             if search_online is True:
                 print( f"Searching svante directory for files..." )            
                 self.files = list_svante_files(f"{self.online_directory}/{self.location}/{self.obj_type}")
-                # Copy them locally
-                for file in self.files:
-                    file_url  = f"{self.online_directory}/{self.location}/{self.obj_type}/{file}"
-                    local_path= f"{self.data_directory}/{self.location}/{self.obj_type}/{file}"
-                    print(f"--- Downloading {file_url} to {local_path}")
-                    resp      = requests.get( file_url )
-                    resp.raise_for_status()
-                    with open( local_path, "wb" ) as f:
-                        f.write( resp.content )
+                if self.files == 404:
+                    print( f"No online files found for {self.location}/{self.obj_type}.")
+                    self.files = []
+                else:
+                    print(f"Found {len(self.files)} {self.obj_type} files online for {self.location}.")
+                    # Copy them locally
+                    for file in self.files:
+                        file_url  = f"{self.online_directory}/{self.location}/{self.obj_type}/{file}"
+                        local_path= f"{self.data_directory}/{self.location}/{self.obj_type}/{file}"
+                        print(f"--- Downloading {file_url} to {local_path}")
+                        resp      = requests.get( file_url )
+                        resp.raise_for_status()
+                        with open( local_path, "wb" ) as f:
+                            f.write( resp.content )
+                            
         # Count the files after both operations; if none found even online, raise error
-        self.Nfiles           = len( self.files )
+        self.Nfiles   = len( self.files )
         if self.files == []:
             raise ValueError(f"No {self.obj_type} files found in the specified directory.")
         else:
@@ -504,21 +557,25 @@ class epw_collection:
         saveFlag : bool, optional
             Whether to save the modified files (default: False)
         """
+        
         # Set output directory if saving is requested
         if saveflag is True:
             savedir = f"{self.data_directory}/{self.location}/f{self.obj_type}"
             os.makedirs( savedir, exist_ok = True )
         else:
             savedir = None
+            
         # Set the default model if not provided
         if 'model' not in params:
             params['model'] = 'MPI-ESM1-2-LR'
+            
         # Download CMIP6 files if not already present
         model_dir = f"{self.data_directory}/cmip6/{ params['model'] }"
         if os.path.exists( model_dir ) is False:
             self.downloadCmip( params['model'] )
         else:
             print( f"CMIP6 files for {params['model']} already exist locally. Proceeding with future shift..." )
+            
         # Calculate yearsShift for 'amy' files
         if self.obj_type == 'amy':
             yearsShift    = params.get( 'futyear', 2050 ) - round( sum( self.amy_years ) / len( self.amy_years ) )
@@ -527,7 +584,8 @@ class epw_collection:
             max_future_year = max( self.amy_years ) + yearsShift
             if max_future_year > 2100:
                 yearsShift = 2100 - max( self.amy_years )
-                print( f"Adjusted yearsShift to {yearsShift} to avoid exceeding year 2100." )
+                print( f"Adjusted yearsShift t{yearsShift} to avoid exceeding year 2100." )
+        
         # Loop over all files and generate future shifted versions
         future_files  = []
         for epwfile in self.files:
@@ -536,6 +594,7 @@ class epw_collection:
             else:
                 params['futyear'] = params.get( 'futyear', 2050 )
             future_files.append( epwfile.with_futureShift( f"{self.data_directory}/cmip6", params, savedir = savedir ) )
+        
         # Set attributes for the new collection
         self_copy           = copy.deepcopy( self )
         self_copy.files     = future_files

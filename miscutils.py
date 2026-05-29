@@ -1,8 +1,9 @@
 # kranke - January 2026
 # Miscellaneous utility functions
 
-import numpy        as np
-from   physicsutils import rh_t2dpt, wind2uv, uv2wind, rh_t2dpt
+import matplotlib.pyplot as plt
+import numpy             as np
+from   physicsutils      import rh_t2dpt, wind2uv, uv2wind, rh_t2dpt
 
 def shift_tuple( t, new_center ):
     start, end = t
@@ -23,9 +24,9 @@ def swapMonthTmy( tmy3_mod, idxmonth, avgShift = {'dbt': 0, 'rh': 0, 'pres':0, '
     
     # dbt, rh, pres
     tmy3_mod.loc[ idxmonth, 'dbt'  ] += ( tmy3_mod.loc[ idxmonth, 'dbt'  ] -  tmy3_mod.loc[ idxmonth, 'dbt'  ].mean() ) * avgShift[ 'at' ] # Stretching
-    tmy3_mod.loc[ idxmonth, 'dbt'  ] += round( avgShift[ 'dbt' ],  1 ) # Shifting
-    tmy3_mod.loc[ idxmonth, 'rh'  ]  += round( avgShift[ 'rh' ],  0 )
-    tmy3_mod.loc[ idxmonth, 'pres' ] += round( avgShift[ 'pres' ], -2 )
+    tmy3_mod.loc[ idxmonth, 'dbt'  ] = round( tmy3_mod.loc[ idxmonth, 'dbt'  ] + avgShift[ 'dbt' ], 1 ) # Round to nearest 0.1 C
+    tmy3_mod.loc[ idxmonth, 'rh'  ]  = round( tmy3_mod.loc[ idxmonth, 'rh'  ]  + avgShift[ 'rh' ], 0 ) # Round to nearest 1%
+    tmy3_mod.loc[ idxmonth, 'pres' ] = round( tmy3_mod.loc[ idxmonth, 'pres' ] + avgShift[ 'pres' ], -1 ) # Round to nearest 10 Pa
         
     # Winds
     utmy, vtmy = wind2uv( tmy3_mod.loc[ idxmonth, 'wspd'  ], tmy3_mod.loc[ idxmonth, 'wdir'  ] )
@@ -33,10 +34,13 @@ def swapMonthTmy( tmy3_mod, idxmonth, avgShift = {'dbt': 0, 'rh': 0, 'pres':0, '
     vShifted = vtmy + avgShift[ 'v' ]
     wspd_shift, wdir_shift           = uv2wind( uShifted, vShifted )
     tmy3_mod.loc[ idxmonth, 'wspd' ] = round( wspd_shift, 1 )
-    tmy3_mod.loc[ idxmonth, 'wdir' ] = round( wdir_shift, -1 )
-    # new dewpoint based on rh shift
-    tmy3_mod.loc[ idxmonth, 'dpt' ] = round( rh_t2dpt( tmy3_mod.loc[ idxmonth, 'dbt'  ], tmy3_mod.loc[ idxmonth, 'rh'  ]  + avgShift[ 'rh' ] ), 1 )
+    tmy3_mod.loc[ idxmonth, 'wdir' ] = round( wdir_shift, -1 ) # Round to nearest 10 degrees
     
+    # New dewpoint based on rh shift
+    # First fix RH to not be negative or greater than 100%
+    tmy3_mod.loc[ idxmonth, 'rh' ]  = tmy3_mod.loc[ idxmonth, 'rh' ].clip( upper = 100, lower = 1 )
+    tmy3_mod.loc[ idxmonth, 'dpt' ] = round( rh_t2dpt( tmy3_mod.loc[ idxmonth, 'dbt'  ], tmy3_mod.loc[ idxmonth, 'rh'  ] ), 1 )
+        
     # If future file, swap the years as well (draw a random year in the future period, that is different from previous month)
     if swapYears is not None:
         if len( swapYears ) != 1:
@@ -55,4 +59,3 @@ def swapMonthTmy( tmy3_mod, idxmonth, avgShift = {'dbt': 0, 'rh': 0, 'pres':0, '
             tmy3_mod.loc[ idxmonth, 'Year'] = swapYears[ 0 ]
 
     return( tmy3_mod )    
-        
