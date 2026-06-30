@@ -5,11 +5,13 @@ from   epwclass import epw_collection
 import numpy as np
 from   plotutils import plotTrackDirect_comparison, plot_amy_famy_collections, compare_amys_ptmys
 
+
+paper_locations = [ 'Singapore__Singapore', 'Helsinki__Finland', 'Cairo__Egypt', 'Washington__USA', 'Madrid__Spain' ]
 # -----------------
 # Input information
 # -----------------
 fut_year  = 2050
-locations = [ 'Boston__MA__USA' ]
+locations = [ 'Boston__MA__USA', 'Manchester_ENG', 'Worcester_MA', 'Pittsfield_MA', 'Singapore__Singapore' ]
 ssps      = [ 'ssp126', 'ssp245', 'ssp370', 'ssp585' ]
 models    = [ 'CanESM5', 'INM-CM4-8', 'MPI-ESM1-2-LR']
 seeds     = np.arange( 1, 16 )
