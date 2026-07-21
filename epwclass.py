@@ -4,20 +4,20 @@
 import re
 import os
 import requests
-import pandas       as     pd
-import numpy        as     np
+import pandas          as     pd
+import numpy           as     np
 import copy
 import warnings
-import xarray       as     xr
-from   ioutils      import list_svante_files, read_nth_line
-from   miscutils    import shift_tuple, swapMonthTmy
-from   constants    import epw_colnames, months_labels
-from   dataclasses  import dataclass, replace
-from   cmip6utils   import CalcGlobalDT, getPatternCoefficients, calculateShift
-from   pathlib      import Path
+import xarray          as     xr
+from   ioutils         import list_svante_files, read_nth_line
+from   miscutils       import shift_tuple, swapMonthTmy
+from   constants       import epw_colnames, months_labels
+from   dataclasses     import dataclass, replace
+from   cmip6utils      import CalcGlobalDT, getPatternCoefficients, calculateShift
+from   pathlib         import Path
 import statsmodels.api as sm
-from   armaUtils     import fitDiurnalCycle, checkResiduals, RegressArma
-from   physicsutils import rh_t2dpt
+from   armaUtils       import fitDiurnalCycle, checkResiduals, RegressArma
+from   physicsutils    import rh_t2dpt
 
 
 @dataclass
@@ -79,7 +79,7 @@ class EPWFile:
         else:
             df = self.data
         # Assign na if any value is 999
-        df.replace( 999, np.nan, inplace = True )
+        # df.replace( 999, np.nan, inplace = True )
 
         # ( 2 ) Automatically populate years from the DataFrame
         if isinstance( self.data, pd.DataFrame)  and 'Year' in self.data.columns:
@@ -254,8 +254,8 @@ class EPWFile:
             # Data
             data_to_write = self.data.drop( columns=['date', 'datetime'] )
             # Put 999 when na is present
-            data_to_write.fillna( 999, inplace = True )
-            data_to_write.to_csv( f, index = False, header = False )
+            # data_to_write.fillna( 999, inplace = True )
+            data_to_write.to_csv( f, index = False, header = False, float_format="%g" )
             
     def calculateMonthlyAverages( self, variable: str ):
         """
